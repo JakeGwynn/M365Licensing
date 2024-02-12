@@ -14,75 +14,87 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
 function Get-UsersWithLicenseType {
     param (
         [Parameter(Mandatory=$true)]
-        [string]$LicenseSkuId,
+        $LicenseSkuIdList,
         [Parameter(Mandatory=$false)]
         [string]$ExportFolderPath
     )
     # Generic List to store user info
     $UserList = New-Object System.Collections.Generic.List[psobject]
 
-    # Get all users in the tenant
+    # Get all users and groups in the tenant
+    Write-Host "Getting all users in the tenant"
     $Users = Get-MsolUser -All  
-
+    Write-Host "Getting all groups in the tenant"
     $Groups = Get-MsolGroup -All
 
-    foreach ($user in $users) {
-        # Check if the user has the old license type
-        $UserLicense = $null
-        $DirectlyAssigned = $null
-        $UserGroups = $null
-        $UserGroupsCombinedArray = $null
-        $UserGroupsCombined = $null
-        $UserObject = [pscustomobject]@{
-            UserPrincipalName = $null
-            DirectlyAssigned = $null
-            GroupAssigned = $null
-            Groups = $null
-        }
-
-        $UserLicense = $User.Licenses | Where-Object {$_.AccountSkuId -eq $LicenseSkuId}
-        #Write-Host "User $($user.UserPrincipalName) has $($UserLicense.GroupsAssigningLicense) license type"
-
-        if ($UserLicense) {
-            if ($user.ObjectId -in $UserLicense.GroupsAssigningLicense -or $UserLicense.GroupsAssigningLicense.Count -eq 0) {
-                $DirectlyAssigned = $true
-            } else {
-                $DirectlyAssigned = $false
-            }
-
-            $UserGroups = $Groups | Where-Object {$_.ObjectId -in $UserLicense.GroupsAssigningLicense}
-            
-            if ($UserGroups) {
-                foreach ($Group in $UserGroups) {
-                    $GroupDisplayName = $Group.DisplayName
-                    $GroupId = $Group.ObjectId
-                    Add-Member -InputObject $UserObject -MemberType NoteProperty -Name "'$GroupDisplayName' | $GroupId" -Value $true
-                }
-                $UserGroupsCombinedArray = $UserGroups | ForEach-Object {"$($_.DisplayName) | $($_.ObjectId)"}
-                $UserGroupsCombined = $UserGroupsCombinedArray -join "`n"
-                $GroupAssigned = $true
-            } else {
-                $GroupAssigned = $false
-            }
-
-            # Add the user info to the list
-            $UserObject.UserPrincipalName = $user.UserPrincipalName
-            $UserObject.DirectlyAssigned = $DirectlyAssigned
-            $UserObject.GroupAssigned = $GroupAssigned
-            $UserObject.Groups = $UserGroupsCombined
-            
-            $UserList.Add($UserObject)
+    # Create the $ExportFolderPath if it doesn't exist
+    if ($ExportFolderPath) {
+        if (-not (Test-Path -Path $ExportFolderPath)) {
+            New-Item -Path $ExportFolderPath -ItemType Directory
         }
     }
-    if ($ExportFolderPath) {
-        $LicenseSkuName = ($LicenseSkuId -split ":")[1]
-        $ExportPath = Join-Path -Path $ExportFolderPath -ChildPath "DirectlyLicensedUsers--$LicenseSkuName.csv"
 
-        $PropertyList = $UserList | ForEach-object { $_.PSObject.Properties.Name } | Select-Object -Unique
+    foreach ($LicenseSkuId in $LicenseSkuIdList) {
+        Write-Host "Checking for users with $($LicenseSkuId) license type"
+        foreach ($User in $Users) {
+            # Check if the user has the old license type
+            $UserLicense = $null
+            $DirectlyAssigned = $null
+            $UserGroups = $null
+            $UserGroupsCombinedArray = $null
+            $UserGroupsCombined = $null
+            $UserObject = [pscustomobject]@{
+                UserPrincipalName = $null
+                DirectlyAssigned = $null
+                GroupAssigned = $null
+                Groups = $null
+            }
 
-        $UserList | Select-Object $PropertyList | Export-Csv -Path $ExportPath -NoTypeInformation
-    } else {
-        return $UserList
+            $UserLicense = $User.Licenses | Where-Object {$_.AccountSkuId -eq $LicenseSkuId}
+            #Write-Host "User $($User.UserPrincipalName) has $($UserLicense.GroupsAssigningLicense) license type"
+
+            if ($UserLicense) {
+                if ($User.ObjectId -in $UserLicense.GroupsAssigningLicense -or $UserLicense.GroupsAssigningLicense.Count -eq 0) {
+                    $DirectlyAssigned = $true
+                } else {
+                    $DirectlyAssigned = $false
+                }
+
+                $UserGroups = $Groups | Where-Object {$_.ObjectId -in $UserLicense.GroupsAssigningLicense}
+                
+                if ($UserGroups) {
+                    foreach ($Group in $UserGroups) {
+                        $GroupDisplayName = $Group.DisplayName
+                        $GroupId = $Group.ObjectId
+                        Add-Member -InputObject $UserObject -MemberType NoteProperty -Name "'$GroupDisplayName' | $GroupId" -Value $true
+                    }
+                    $UserGroupsCombinedArray = $UserGroups | ForEach-Object {"$($_.DisplayName) | $($_.ObjectId)"}
+                    $UserGroupsCombined = $UserGroupsCombinedArray -join "`n"
+                    $GroupAssigned = $true
+                } else {
+                    $GroupAssigned = $false
+                }
+
+                # Add the user info to the list
+                $UserObject.UserPrincipalName = $User.UserPrincipalName
+                $UserObject.DirectlyAssigned = $DirectlyAssigned
+                $UserObject.GroupAssigned = $GroupAssigned
+                $UserObject.Groups = $UserGroupsCombined
+                
+                $UserList.Add($UserObject)
+            }
+        }
+        if ($ExportFolderPath) {
+            Write-Host "Exporting $($LicenseSkuId) license type users to CSV"
+            $LicenseSkuName = ($LicenseSkuId -split ":")[1]
+            $ExportPath = Join-Path -Path $ExportFolderPath -ChildPath "DirectlyLicensedUsers--$LicenseSkuName.csv"
+
+            $PropertyList = $UserList | ForEach-object { $_.PSObject.Properties.Name } | Select-Object -Unique
+
+            $UserList | Select-Object $PropertyList | Export-Csv -Path $ExportPath -NoTypeInformation
+        } else {
+            return $UserList
+        }
     }
 }
 
@@ -93,6 +105,6 @@ Get-MsolAccountSku
 
 $LicensesToCheck = "jakegwynndemo:SPE_E5", "jakegwynndemo:SPE_E3", "jakegwynndemo:SPE_E1"
 
-foreach ($License in $LicensesToCheck) {
-    Get-UsersWithLicenseType -LicenseSkuId $License -ExportFolderPath "C:\temp\"
-}
+
+Get-UsersWithLicenseType -LicenseSkuId $LicensesToCheck -ExportFolderPath "C:\temp\"
+

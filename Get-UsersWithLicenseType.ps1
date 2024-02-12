@@ -18,8 +18,6 @@ function Get-UsersWithLicenseType {
         [Parameter(Mandatory=$false)]
         [string]$ExportFolderPath
     )
-    # Generic List to store user info
-    $UserList = New-Object System.Collections.Generic.List[psobject]
 
     # Get all users and groups in the tenant
     Write-Host "Getting all users in the tenant"
@@ -35,7 +33,10 @@ function Get-UsersWithLicenseType {
     }
 
     foreach ($LicenseSkuId in $LicenseSkuIdList) {
+        # Generic List to store user info
+        $UserList = New-Object System.Collections.Generic.List[psobject]
         Write-Host "Checking for users with $($LicenseSkuId) license type"
+        $i = 0 
         foreach ($User in $Users) {
             # Check if the user has the old license type
             $UserLicense = $null
@@ -52,6 +53,11 @@ function Get-UsersWithLicenseType {
 
             $UserLicense = $User.Licenses | Where-Object {$_.AccountSkuId -eq $LicenseSkuId}
             #Write-Host "User $($User.UserPrincipalName) has $($UserLicense.GroupsAssigningLicense) license type"
+
+            $i++
+            if ($i % 100 -eq 0) {
+                Write-Host "Processed $i users"
+            }
 
             if ($UserLicense) {
                 if ($User.ObjectId -in $UserLicense.GroupsAssigningLicense -or $UserLicense.GroupsAssigningLicense.Count -eq 0) {
